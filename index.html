@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Distance-Time Graph Runner</title>
+  <style>
+    body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; }
+    canvas { border: 1px solid #ccc; margin-top: 10px; }
+    #controls { margin-top: 10px; }
+    #results { margin-top: 15px; font-family: monospace; font-size: 14px; white-space: pre; text-align: left; }
+  </style>
+</head>
+<body>
+  <h2>Distance-Time Graph Runner</h2>
+  <canvas id="graphCanvas" width="520" height="320"></canvas>
+  <canvas id="trackCanvas" width="520" height="100"></canvas>
+  <div id="controls">
+    <button onclick="startAnimation()">Start</button>
+    <button onclick="resetAnimation()">Reset</button>
+  </div>
+  <div id="results"></div>
+  <script>
+    // JS logic from your final working simulation
+    const graphCanvas = document.getElementById('graphCanvas');
+    const trackCanvas = document.getElementById('trackCanvas');
+    const gctx = graphCanvas.getContext('2d');
+    const tctx = trackCanvas.getContext('2d');
+    const resultsDiv = document.getElementById('results');
+    const graphWidth = 520;
+    const graphHeight = 320;
+    const trackWidth = 500;
+    const marginLeft = 50;
+    const marginRight = 20;
+    const marginBottom = 40;
+    const marginTop = 20;
+    const maxTime = 10;
+    const maxDistance = 40;
+    let points = [{x: 0, y: 0}, {x: 2, y: 10}, {x: 4, y: 20}, {x: 6, y: 30}, {x: 8, y: 20}, {x: 10, y: 10}];
+    let selectedPoint = null;
+    let animating = false;
+    let animationStart = null;
+    let path = [];
+
+    function timeToX(t) {
+      return marginLeft + (t / maxTime) * (graphWidth - marginLeft - marginRight);
+    }
+
+    function distanceToY(d) {
+      return graphHeight - marginBottom - (d / maxDistance) * (graphHeight - marginTop - marginBottom);
+    }
+
+    function xToTime(x) {
+      return ((x - marginLeft) / (graphWidth - marginLeft - marginRight)) * maxTime;
+    }
+
+    function yToDistance(y) {
+      return ((graphHeight - marginBottom - y) / (graphHeight - marginTop - marginBottom)) * maxDistance;
+    }
+
+    function drawGraph() {
+      gctx.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
+      gctx.strokeStyle = '#888';
+      gctx.beginPath();
+      gctx.moveTo(marginLeft, marginTop); gctx.lineTo(marginLeft, graphHeight - marginBottom);
+      gctx.moveTo(marginLeft, graphHeight - marginBottom); gctx.lineTo(graphWidth - marginRight, graphHeight - marginBottom);
+      gctx.stroke();
+
+      gctx.fillStyle = 'black';
+      gctx.font = '12px sans-serif';
+      for (let t = 0; t <= maxTime; t += 2) {
+        let x = timeToX(t);
+        gctx.beginPath();
+        gctx.moveTo(x, graphHeight - marginBottom);
+        gctx.lineTo(x, graphHeight - marginBottom + 5);
+        gctx.stroke();
+        gctx.fillText(`${t}`, x - 8, graphHeight - marginBottom + 18);
+      }
+      gctx.fillText("Time (s)", graphWidth / 2 - 30, graphHeight - 5);
+      for (let d = 0; d <= maxDistance; d += 10) {
+        let y = distanceToY(d);
+        gctx.beginPath();
+        gctx.moveTo(marginLeft - 5, y);
+        gctx.lineTo(marginLeft, y);
+        gctx.stroke();
+        gctx.fillText(`${d}`, marginLeft - 30, y + 4);
+      }
+      gctx.save();
+      gctx.translate(10, graphHeight / 2);
+      gctx.rotate(-Math.PI / 2);
+      gctx.fillText("Position (m)", 0, 0);
+      gctx.restore();
+
+      const canvasPoints = points.map(p => ({ x: timeToX(p.x), y: distanceToY(p.y) }));
+      gctx.beginPath();
+      gctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
+      for (let p of canvasPoints) gctx.lineTo(p.x, p.y);
+      gctx.strokeStyle = 'blue';
+      gctx.lineWidth = 2;
+      gctx.stroke();
+      for (let i = 0; i < canvasPoints.length; i++) {
+        let p = canvasPoints[i];
+        gctx.beginPath();
+        gctx.arc(p.x, p.y, 6, 0, 2 * Math.PI);
+        gctx.fillStyle = 'red';
+        gctx.fill();
+        const point = points[i];
+        gctx.fillStyle = 'black';
+        gctx.fillText(`(${Math.round(point.x)}, ${Math.round(point.y)})`, p.x - 20, p.y - 10);
+      }
+    }
+
+    function drawTrack(position) {
+      tctx.clearRect(0, 0, trackCanvas.width, trackCanvas.height);
+      tctx.fillStyle = '#eee';
+      tctx.fillRect(10, 40, trackWidth, 20);
+      tctx.fillStyle = '#555';
+      for (let i = 0; i <= 4; i++) {
+        let x = 10 + i * (trackWidth / 4);
+        tctx.fillRect(x, 40, 2, 20);
+        tctx.fillText(`${i * 10}`, x + 2, 35);
+      }
+      tctx.beginPath();
+      tctx.arc(10 + position, 50, 10, 0, 2 * Math.PI);
+      tctx.fillStyle = 'blue';
+      tctx.fill();
+    }
+
+    function interpolate(x, x1, y1, x2, y2) {
+      return y1 + ((y2 - y1) * (x - x1)) / (x2 - x1);
+    }
+
+    function buildPath() {
+      path = [];
+      for (let i = 0; i < points.length - 1; i++) {
+        let p1 = points[i];
+        let p2 = points[i + 1];
+        let duration = p2.x - p1.x;
+        path.push({ start: p1, end: p2, duration });
+      }
+    }
+
+    function computeResults() {
+      let totalDistance = 0;
+      for (let i = 0; i < points.length - 1; i++) {
+        totalDistance += Math.abs(Math.round(points[i + 1].y) - Math.round(points[i].y));
+      }
+      let displacement = Math.round(points[points.length - 1].y) - Math.round(points[0].y);
+      let totalTime = Math.round(points[points.length - 1].x) - Math.round(points[0].x);
+      let speed = totalDistance / totalTime;
+      let velocity = displacement / totalTime;
+      resultsDiv.textContent = `Distance: ${totalDistance.toFixed(2)} m\nDisplacement: ${displacement.toFixed(2)} m\nSpeed: ${speed.toFixed(2)} m/s\nVelocity: ${velocity.toFixed(2)} m/s`;
+    }
+
+    function startAnimation() {
+      if (animating) return;
+      buildPath();
+      animating = true;
+      animationStart = null;
+      resultsDiv.textContent = "";
+      requestAnimationFrame(animate);
+    }
+
+    function animate(timestamp) {
+      if (!animationStart) animationStart = timestamp;
+      let elapsed = (timestamp - animationStart) / 1000;
+      let currentTime = 0;
+      for (let seg of path) {
+        if (elapsed < currentTime + seg.duration) {
+          let t = (elapsed - currentTime) / seg.duration;
+          let pos = interpolate(t, 0, seg.start.y, 1, seg.end.y);
+          let xPos = (pos / maxDistance) * trackWidth;
+          drawTrack(xPos);
+          requestAnimationFrame(animate);
+          return;
+        }
+        currentTime += seg.duration;
+      }
+      animating = false;
+      computeResults();
+    }
+
+    function resetAnimation() {
+      drawGraph();
+      drawTrack((points[0].y / maxDistance) * trackWidth);
+      resultsDiv.textContent = "";
+    }
+
+    graphCanvas.addEventListener('mousedown', e => {
+      const rect = graphCanvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const canvasPoints = points.map(p => ({ x: timeToX(p.x), y: distanceToY(p.y) }));
+      selectedPoint = null;
+      canvasPoints.forEach((cp, i) => {
+        if (Math.hypot(cp.x - mx, cp.y - my) < 10) selectedPoint = i;
+      });
+    });
+
+    graphCanvas.addEventListener('mousemove', e => {
+      if (selectedPoint !== null) {
+        const rect = graphCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const newY = Math.max(marginTop, Math.min(my, graphHeight - marginBottom));
+        const newX = Math.max(marginLeft, Math.min(mx, graphWidth - marginRight));
+        if (selectedPoint === 0) {
+          points[0].x = 0;
+          points[0].y = yToDistance(newY);
+        } else if (selectedPoint === points.length - 1) {
+          points[points.length - 1].x = maxTime;
+          points[points.length - 1].y = yToDistance(newY);
+        } else {
+          points[selectedPoint].x = xToTime(newX);
+          points[selectedPoint].y = yToDistance(newY);
+        }
+        drawGraph();
+        drawTrack((points[0].y / maxDistance) * trackWidth);
+      }
+    });
+
+    graphCanvas.addEventListener('mouseup', () => selectedPoint = null);
+    drawGraph();
+    resetAnimation();
+  </script>
+</body>
+</html>
